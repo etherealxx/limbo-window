@@ -1,6 +1,11 @@
 @tool
 extends Node
 
+var action_index := 0
+var action_count := 0
+var _current_action_index := 0
+var _current_action_count := 0
+
 func create_tile_restore_point(undo_manager: EditorUndoRedoManager, tm: TileMap, layer: int, cells: Array, and_surrounding_cells: bool = true) -> void:
 	if and_surrounding_cells:
 		cells = BetterTerrain._widen(tm, cells)
@@ -69,13 +74,14 @@ func create_peering_restore_point(undo_manager: EditorUndoRedoManager, ts: TileS
 				
 				var td := source.get_tile_data(coord, alternate)
 				var tile_type := BetterTerrain.get_tile_terrain_type(td)
-				if tile_type == -1:
+				if tile_type == BetterTerrain.TileCategory.NON_TERRAIN:
 					continue
 				
 				var peering_dict := {}
 				for c in BetterTerrain.tile_peering_keys(td):
 					peering_dict[c] = BetterTerrain.tile_peering_types(td, c)
-				restore.append([source_id, coord, alternate, tile_type, peering_dict])
+				var symmetry = BetterTerrain.get_tile_symmetry_type(td)
+				restore.append([source_id, coord, alternate, tile_type, peering_dict, symmetry])
 	
 	undo_manager.add_undo_method(self, &"restore_peering", ts, restore)
 
@@ -96,7 +102,7 @@ func create_peering_restore_point_specific(undo_manager: EditorUndoRedoManager, 
 				
 				var td := source.get_tile_data(coord, alternate)
 				var tile_type := BetterTerrain.get_tile_terrain_type(td)
-				if tile_type == -1:
+				if tile_type == BetterTerrain.TileCategory.NON_TERRAIN:
 					continue
 				
 				var to_restore : bool = tile_type == protect
@@ -114,7 +120,8 @@ func create_peering_restore_point_specific(undo_manager: EditorUndoRedoManager, 
 				var peering_dict := {}
 				for c in cells:
 					peering_dict[c] = BetterTerrain.tile_peering_types(td, c)
-				restore.append([source_id, coord, alternate, tile_type, peering_dict])
+				var symmetry = BetterTerrain.get_tile_symmetry_type(td)
+				restore.append([source_id, coord, alternate, tile_type, peering_dict, symmetry])
 	
 	undo_manager.add_undo_method(self, &"restore_peering", ts, restore)
 
@@ -128,7 +135,8 @@ func create_peering_restore_point_tile(undo_manager: EditorUndoRedoManager, ts: 
 	var peering_dict := {}
 	for c in BetterTerrain.tile_peering_keys(td):
 		peering_dict[c] = BetterTerrain.tile_peering_types(td, c)
-	restore.append([source_id, coord, alternate, tile_type, peering_dict])
+	var symmetry = BetterTerrain.get_tile_symmetry_type(td)
+	restore.append([source_id, coord, alternate, tile_type, peering_dict, symmetry])
 	
 	undo_manager.add_undo_method(self, &"restore_peering", ts, restore)
 
@@ -145,9 +153,11 @@ func restore_peering(ts: TileSet, restore: Array) -> void:
 				BetterTerrain.remove_tile_peering_type(ts, td, peering, t)
 			for t in peering_types[peering]:
 				BetterTerrain.add_tile_peering_type(ts, td, peering, t)
+		var symmetry = r[5]
+		BetterTerrain.set_tile_symmetry_type(ts, td, symmetry)
 
 
-func create_terran_type_restore_point(undo_manager: EditorUndoRedoManager, ts: TileSet) -> void:
+func create_terrain_type_restore_point(undo_manager: EditorUndoRedoManager, ts: TileSet) -> void:
 	var count = BetterTerrain.terrain_count(ts)
 	var restore = []
 	for i in count:
@@ -159,4 +169,22 @@ func create_terran_type_restore_point(undo_manager: EditorUndoRedoManager, ts: T
 func restore_terrain(ts: TileSet, restore: Array) -> void:
 	for i in restore.size():
 		var r = restore[i]
-		BetterTerrain.set_terrain(ts, i, r.name, r.color, r.type, r.categories)
+		BetterTerrain.set_terrain(ts, i, r.name, r.color, r.type, r.categories, r.icon)
+
+
+func add_do_method(undo_manager: EditorUndoRedoManager, object:Object, method:StringName, args:Array):
+	if action_index > _current_action_index:
+		_current_action_index = action_index
+		_current_action_count = action_count
+	if action_count > _current_action_count:
+		_current_action_count = action_count
+	undo_manager.add_do_method(self, "_do_method", object, method, args, action_count)
+
+
+func _do_method(object:Object, method:StringName, args:Array, this_action_count:int):
+	if this_action_count >= _current_action_count:
+		object.callv(method, args)
+
+
+func finish_action():
+	_current_action_count = 0
